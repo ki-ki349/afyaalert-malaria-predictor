@@ -1,0 +1,19 @@
+Feature,Description
+county,Name of the county
+date,Month and year (YYYY-MM)
+confirmed_cases,Number of confirmed malaria cases
+rainfall_mm,Rainfall in millimeters
+temp_mean_c,Average temperature in Celsius
+humidity_pct,Relative humidity percentage
+cases_lag_1,Cases from previous month
+cases_lag_2,Cases from 2 months ago
+cases_lag_3,Cases from 3 months ago
+rainfall_3m_avg,Average rainfall over last 3 months
+temp_3m_avg,Average temperature over last 3 months
+humidity_3m_avg,Average humidity over last 3 months
+month,Month number (1-12)
+season,Season name (Dry/Long_Rains/Short_Rains)
+season_Dry,Dummy variable: 1 if Dry season
+season_Long_Rains,Dummy variable: 1 if Long Rains
+season_Short_Rains,Dummy variable: 1 if Short Rains
+risk_level,Target variable: Low/Medium/High risk

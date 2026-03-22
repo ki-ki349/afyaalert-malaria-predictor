@@ -1,0 +1,5 @@
+Best Model: Random Forest
+F1-Score: 0.8377
+Features used: 14
+Training samples: 936
+Testing samples: 234
