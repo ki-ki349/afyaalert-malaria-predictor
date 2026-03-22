@@ -202,7 +202,7 @@ selected_county = st.sidebar.selectbox("📍 Select County", counties)
 selected_date = st.sidebar.selectbox("📅 Select Month", dates)
 
 # Predict button
-predict_clicked = st.sidebar.button("🔮 Predict Risk", type="primary", use_container_width='stretch')
+st.plotly_chart(fig)
 
 # Main content area
 col1, col2 = st.columns([3, 2])
@@ -265,7 +265,7 @@ fig.add_trace(go.Scattermap(
     name='Selected'
 ))
         
-        st.plotly_chart(fig, use_container_width='stretch')
+st.plotly_chart(fig)
     else:
         st.info("No data available for selected county and date")
 
@@ -344,7 +344,7 @@ with forecast_tab1:
         display_df.columns = ['Date', 'Predicted Cases', 'Risk Level', 
                               'Rainfall (mm)', 'Temp (°C)', 'Humidity (%)']
         
-        st.dataframe(display_df, use_container_width='stretch')
+st.plotly_chart(fig)
         
         # Show risk summary
         st.write("### Risk Summary")
@@ -415,7 +415,7 @@ with forecast_tab2:
         hovermode='x unified'
     )
     
-    st.plotly_chart(fig_forecast, use_container_width='stretch')
+st.plotly_chart(fig)
     
     # Climate forecast
     st.write("### Climate Forecast (Based on Historical Averages)")
@@ -443,7 +443,7 @@ with forecast_tab2:
     fig_climate.update_yaxes(title_text="Rainfall (mm)", row=1, col=1)
     fig_climate.update_yaxes(title_text="Temperature (°C)", row=2, col=1)
     
-    st.plotly_chart(fig_climate, use_container_width='stretch')
+   st.plotly_chart(fig)
 
 # County selector for comparison
 compare_counties = st.multiselect(
@@ -469,7 +469,7 @@ if compare_counties:
             title='Malaria Cases Over Time',
             labels={'confirmed_cases': 'Number of Cases', 'date': 'Date'}
         )
-        st.plotly_chart(fig1, use_container_width='stretch')
+st.plotly_chart(fig)
     
     with tab2:
         # Scatter plot of cases vs rainfall
@@ -483,7 +483,7 @@ if compare_counties:
             title='Cases vs Rainfall (point size = temperature)',
             labels={'rainfall_mm': 'Rainfall (mm)', 'confirmed_cases': 'Cases'}
         )
-        st.plotly_chart(fig2, use_container_width='stretch')
+st.plotly_chart(fig)
     
     with tab3:
         # Boxplot by season
@@ -495,7 +495,7 @@ if compare_counties:
             title='Case Distribution by Season',
             labels={'confirmed_cases': 'Cases', 'season': 'Season'}
         )
-        st.plotly_chart(fig3, use_container_width='stretch')
+st.plotly_chart(fig)
 
 # Feature importance section
 st.markdown("---")
@@ -517,7 +517,7 @@ if feature_importance is not None:
             color='importance',
             color_continuous_scale='viridis'
         )
-        st.plotly_chart(fig4, use_container_width='stretch')
+     st.plotly_chart(fig)
     
     with col_f2:
         st.markdown("### 📝 Key Insights")
@@ -566,7 +566,7 @@ try:
         height=400
     )
     
-    st.plotly_chart(fig5, use_container_width='stretch')
+st.plotly_chart(fig)
     
     # Show the best model
     best_model = perf_df['F1-Score'].idxmax()
