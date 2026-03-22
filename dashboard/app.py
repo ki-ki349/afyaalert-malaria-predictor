@@ -64,8 +64,9 @@ st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/Flag
 st.sidebar.title("🔍 Prediction Controls")
 
 # Load data and models
-@st.cache_data
-def generate_forecast(df, model, months_ahead=24):
+@st.cache_resource
+@st.cache_resource
+def generate_forecast(df, _model, months_ahead=24):
     """
     Generate future predictions based on historical patterns
     """
@@ -74,7 +75,7 @@ def generate_forecast(df, model, months_ahead=24):
     
     # Create future dates
     future_dates = pd.date_range(start=last_date + pd.DateOffset(months=1), 
-                                  periods=months_ahead, freq='M')
+                                  periods=months_ahead, freq='ME')
     
     # Get average climate patterns by month
     climate_avg = df.groupby(df['date'].dt.month).agg({
@@ -82,6 +83,7 @@ def generate_forecast(df, model, months_ahead=24):
         'temp_mean_c': 'mean',
         'humidity_pct': 'mean'
     }).reset_index()
+    climate_avg.columns = ['month', 'rainfall_mm', 'temp_mean_c', 'humidity_pct']
     
     # Create forecast dataframe
     forecast_data = []
@@ -89,7 +91,7 @@ def generate_forecast(df, model, months_ahead=24):
         month = date.month
         
         # Get average climate for this month
-        climate = climate_avg[climate_avg['date'] == month]
+        climate = climate_avg[climate_avg['month'] == month]
         
         # Add small yearly trend (assume 2% decrease per year due to interventions)
         year_factor = 0.98 ** ((date.year - last_date.year))
@@ -98,16 +100,15 @@ def generate_forecast(df, model, months_ahead=24):
             'date': date,
             'year': date.year,
             'month': month,
-            'rainfall_mm': climate['rainfall_mm'].values[0] if not climate.empty else 100,
-            'temp_mean_c': climate['temp_mean_c'].values[0] if not climate.empty else 25,
-            'humidity_pct': climate['humidity_pct'].values[0] if not climate.empty else 70,
+            'rainfall_mm': float(climate['rainfall_mm'].values[0]) if not climate.empty else 100.0,
+            'temp_mean_c': float(climate['temp_mean_c'].values[0]) if not climate.empty else 25.0,
+            'humidity_pct': float(climate['humidity_pct'].values[0]) if not climate.empty else 70.0,
             'year_factor': year_factor
         })
     
     forecast_df = pd.DataFrame(forecast_data)
     
-    # Add lag features for prediction
-    # Get last 3 months of actual data for each county
+    # Get counties
     counties = df['county'].unique()
     all_predictions = []
     
@@ -116,26 +117,14 @@ def generate_forecast(df, model, months_ahead=24):
         county_data = df[df['county'] == county].sort_values('date')
         last_cases = county_data['confirmed_cases'].tail(3).values
         
-        for i, row in forecast_df.iterrows():
-            # Create features similar to training data
-            pred_features = {
-                'county': county,
-                'year': row['year'],
-                'month': row['month'],
-                'rainfall_mm': row['rainfall_mm'],
-                'temp_mean_c': row['temp_mean_c'],
-                'humidity_pct': row['humidity_pct'],
-                'cases_lag_1': last_cases[-1] if len(last_cases) >= 1 else 50,
-                'cases_lag_2': last_cases[-2] if len(last_cases) >= 2 else 50,
-                'cases_lag_3': last_cases[-3] if len(last_cases) >= 3 else 50,
-                'rainfall_3m_avg': row['rainfall_mm'],
-                'temp_3m_avg': row['temp_mean_c'],
-                'humidity_3m_avg': row['humidity_pct'],
-                'season': 'Long_Rains' if row['month'] in [3,4,5] else ('Short_Rains' if row['month'] in [10,11,12] else 'Dry')
-            }
+        for _, row in forecast_df.iterrows():
+            # Get lag values
+            lag1 = last_cases[-1] if len(last_cases) >= 1 else 50
+            lag2 = last_cases[-2] if len(last_cases) >= 2 else 50
+            lag3 = last_cases[-3] if len(last_cases) >= 3 else 50
             
             # Apply year trend factor
-            pred_cases = pred_features['cases_lag_1'] * row['year_factor']
+            pred_cases = lag1 * row['year_factor']
             
             # Determine risk level
             if pred_cases > 150:
@@ -213,7 +202,7 @@ selected_county = st.sidebar.selectbox("📍 Select County", counties)
 selected_date = st.sidebar.selectbox("📅 Select Month", dates)
 
 # Predict button
-predict_clicked = st.sidebar.button("🔮 Predict Risk", type="primary", use_container_width=True)
+predict_clicked = st.sidebar.button("🔮 Predict Risk", type="primary", use_container_width='stretch')
 
 # Main content area
 col1, col2 = st.columns([3, 2])
@@ -246,36 +235,37 @@ with col1:
         })
         
         # Create scatter map
-        fig = px.scatter_mapbox(
-            map_data,
-            lat='lat',
-            lon='lon',
-            color='risk',
-            color_discrete_map=risk_colors,
-            text='county',
-            zoom=5,
-            height=500,
-            title='Kenya Counties by Malaria Risk'
-        )
+    # Create scatter map using updated plotly syntax
+fig = px.scatter_map(
+    map_data,
+    lat='lat',
+    lon='lon',
+    color='risk',
+    color_discrete_map=risk_colors,
+    text='county',
+    zoom=5,
+    height=500,
+    title='Kenya Counties by Malaria Risk'
+)
+
+fig.update_layout(
+    map_style="open-street-map",
+    showlegend=True,
+    margin={"r":0,"t":30,"l":0,"b":0}
+)
+
+# Highlight selected county
+fig.add_trace(go.Scattermap(
+    lat=[map_data[map_data['county'] == selected_county]['lat'].iloc[0]],
+    lon=[map_data[map_data['county'] == selected_county]['lon'].iloc[0]],
+    mode='markers+text',
+    marker=dict(size=20, color='yellow', symbol='star'),
+    text=selected_county,
+    textposition="top center",
+    name='Selected'
+))
         
-        fig.update_layout(
-            mapbox_style="open-street-map",
-            showlegend=True,
-            margin={"r":0,"t":30,"l":0,"b":0}
-        )
-        
-        # Highlight selected county
-        fig.add_trace(go.Scattermapbox(
-            lat=[map_data[map_data['county'] == selected_county]['lat'].iloc[0]],
-            lon=[map_data[map_data['county'] == selected_county]['lon'].iloc[0]],
-            mode='markers+text',
-            marker=dict(size=20, color='yellow', symbol='star'),
-            text=selected_county,
-            textposition="top center",
-            name='Selected'
-        ))
-        
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width='stretch')
     else:
         st.info("No data available for selected county and date")
 
@@ -354,7 +344,7 @@ with forecast_tab1:
         display_df.columns = ['Date', 'Predicted Cases', 'Risk Level', 
                               'Rainfall (mm)', 'Temp (°C)', 'Humidity (%)']
         
-        st.dataframe(display_df, use_container_width=True)
+        st.dataframe(display_df, use_container_width='stretch')
         
         # Show risk summary
         st.write("### Risk Summary")
@@ -425,7 +415,7 @@ with forecast_tab2:
         hovermode='x unified'
     )
     
-    st.plotly_chart(fig_forecast, use_container_width=True)
+    st.plotly_chart(fig_forecast, use_container_width='stretch')
     
     # Climate forecast
     st.write("### Climate Forecast (Based on Historical Averages)")
@@ -453,7 +443,7 @@ with forecast_tab2:
     fig_climate.update_yaxes(title_text="Rainfall (mm)", row=1, col=1)
     fig_climate.update_yaxes(title_text="Temperature (°C)", row=2, col=1)
     
-    st.plotly_chart(fig_climate, use_container_width=True)
+    st.plotly_chart(fig_climate, use_container_width='stretch')
 
 # County selector for comparison
 compare_counties = st.multiselect(
@@ -479,7 +469,7 @@ if compare_counties:
             title='Malaria Cases Over Time',
             labels={'confirmed_cases': 'Number of Cases', 'date': 'Date'}
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, use_container_width='stretch')
     
     with tab2:
         # Scatter plot of cases vs rainfall
@@ -493,7 +483,7 @@ if compare_counties:
             title='Cases vs Rainfall (point size = temperature)',
             labels={'rainfall_mm': 'Rainfall (mm)', 'confirmed_cases': 'Cases'}
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, use_container_width='stretch')
     
     with tab3:
         # Boxplot by season
@@ -505,7 +495,7 @@ if compare_counties:
             title='Case Distribution by Season',
             labels={'confirmed_cases': 'Cases', 'season': 'Season'}
         )
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig3, use_container_width='stretch')
 
 # Feature importance section
 st.markdown("---")
@@ -527,7 +517,7 @@ if feature_importance is not None:
             color='importance',
             color_continuous_scale='viridis'
         )
-        st.plotly_chart(fig4, use_container_width=True)
+        st.plotly_chart(fig4, use_container_width='stretch')
     
     with col_f2:
         st.markdown("### 📝 Key Insights")
@@ -576,7 +566,7 @@ try:
         height=400
     )
     
-    st.plotly_chart(fig5, use_container_width=True)
+    st.plotly_chart(fig5, use_container_width='stretch')
     
     # Show the best model
     best_model = perf_df['F1-Score'].idxmax()
