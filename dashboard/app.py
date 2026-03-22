@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import joblib
 import os
 from datetime import datetime
+from plotly.subplots import make_subplots
 
 # Page configuration
 st.set_page_config(
@@ -64,6 +65,99 @@ st.sidebar.title("🔍 Prediction Controls")
 
 # Load data and models
 @st.cache_data
+def generate_forecast(df, model, months_ahead=24):
+    """
+    Generate future predictions based on historical patterns
+    """
+    # Get the last date in the dataset
+    last_date = df['date'].max()
+    
+    # Create future dates
+    future_dates = pd.date_range(start=last_date + pd.DateOffset(months=1), 
+                                  periods=months_ahead, freq='M')
+    
+    # Get average climate patterns by month
+    climate_avg = df.groupby(df['date'].dt.month).agg({
+        'rainfall_mm': 'mean',
+        'temp_mean_c': 'mean',
+        'humidity_pct': 'mean'
+    }).reset_index()
+    
+    # Create forecast dataframe
+    forecast_data = []
+    for date in future_dates:
+        month = date.month
+        
+        # Get average climate for this month
+        climate = climate_avg[climate_avg['date'] == month]
+        
+        # Add small yearly trend (assume 2% decrease per year due to interventions)
+        year_factor = 0.98 ** ((date.year - last_date.year))
+        
+        forecast_data.append({
+            'date': date,
+            'year': date.year,
+            'month': month,
+            'rainfall_mm': climate['rainfall_mm'].values[0] if not climate.empty else 100,
+            'temp_mean_c': climate['temp_mean_c'].values[0] if not climate.empty else 25,
+            'humidity_pct': climate['humidity_pct'].values[0] if not climate.empty else 70,
+            'year_factor': year_factor
+        })
+    
+    forecast_df = pd.DataFrame(forecast_data)
+    
+    # Add lag features for prediction
+    # Get last 3 months of actual data for each county
+    counties = df['county'].unique()
+    all_predictions = []
+    
+    for county in counties:
+        # Get last 3 actual case values for this county
+        county_data = df[df['county'] == county].sort_values('date')
+        last_cases = county_data['confirmed_cases'].tail(3).values
+        
+        for i, row in forecast_df.iterrows():
+            # Create features similar to training data
+            pred_features = {
+                'county': county,
+                'year': row['year'],
+                'month': row['month'],
+                'rainfall_mm': row['rainfall_mm'],
+                'temp_mean_c': row['temp_mean_c'],
+                'humidity_pct': row['humidity_pct'],
+                'cases_lag_1': last_cases[-1] if len(last_cases) >= 1 else 50,
+                'cases_lag_2': last_cases[-2] if len(last_cases) >= 2 else 50,
+                'cases_lag_3': last_cases[-3] if len(last_cases) >= 3 else 50,
+                'rainfall_3m_avg': row['rainfall_mm'],
+                'temp_3m_avg': row['temp_mean_c'],
+                'humidity_3m_avg': row['humidity_pct'],
+                'season': 'Long_Rains' if row['month'] in [3,4,5] else ('Short_Rains' if row['month'] in [10,11,12] else 'Dry')
+            }
+            
+            # Apply year trend factor
+            pred_cases = pred_features['cases_lag_1'] * row['year_factor']
+            
+            # Determine risk level
+            if pred_cases > 150:
+                risk = 'High'
+            elif pred_cases > 70:
+                risk = 'Medium'
+            else:
+                risk = 'Low'
+            
+            all_predictions.append({
+                'county': county,
+                'date': row['date'],
+                'year': row['year'],
+                'month': row['month'],
+                'predicted_cases': int(pred_cases),
+                'risk_level': risk,
+                'rainfall_mm': row['rainfall_mm'],
+                'temp_mean_c': row['temp_mean_c'],
+                'humidity_pct': row['humidity_pct']
+            })
+    
+    return pd.DataFrame(all_predictions)
 def load_data():
     """Load the processed dataset"""
     try:
@@ -228,8 +322,138 @@ with col2:
         st.warning("Select a county and date to see prediction")
 
 # Time series section
+# Forecast Section
 st.markdown("---")
-st.subheader("📈 Historical Trends")
+st.subheader("🔮 Future Forecast")
+
+# Create tabs for different views
+forecast_tab1, forecast_tab2 = st.tabs(["📈 Forecast Predictions", "📊 Forecast Charts"])
+
+# Get forecast data
+forecast_df = generate_forecast(df, model)
+
+with forecast_tab1:
+    # County selector for forecast
+    forecast_county = st.selectbox(
+        "Select county for forecast",
+        options=counties,
+        key="forecast_county",
+        index=0
+    )
+    
+    # Filter forecast for selected county
+    county_forecast = forecast_df[forecast_df['county'] == forecast_county].copy()
+    
+    if not county_forecast.empty:
+        # Show forecast table
+        st.write(f"### Forecast for {forecast_county} (2025-2026)")
+        
+        display_df = county_forecast[['date', 'predicted_cases', 'risk_level', 
+                                        'rainfall_mm', 'temp_mean_c', 'humidity_pct']].copy()
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m')
+        display_df.columns = ['Date', 'Predicted Cases', 'Risk Level', 
+                              'Rainfall (mm)', 'Temp (°C)', 'Humidity (%)']
+        
+        st.dataframe(display_df, use_container_width=True)
+        
+        # Show risk summary
+        st.write("### Risk Summary")
+        col_r1, col_r2, col_r3 = st.columns(3)
+        
+        high_months = len(county_forecast[county_forecast['risk_level'] == 'High'])
+        medium_months = len(county_forecast[county_forecast['risk_level'] == 'Medium'])
+        low_months = len(county_forecast[county_forecast['risk_level'] == 'Low'])
+        
+        with col_r1:
+            st.metric("High Risk Months", high_months, delta=None)
+        with col_r2:
+            st.metric("Medium Risk Months", medium_months)
+        with col_r3:
+            st.metric("Low Risk Months", low_months)
+        
+        # Warning for high risk
+        if high_months > 6:
+            st.warning("⚠️ **Alert:** More than 6 months of high risk predicted. Consider enhanced preventive measures.")
+        elif high_months > 3:
+            st.info("📋 **Notice:** Several high-risk months predicted. Prepare intervention plans.")
+        else:
+            st.success("✅ **Good:** Low number of high-risk months predicted.")
+
+with forecast_tab2:
+    # Visualize forecast
+    st.write("### Forecast Visualization")
+    
+    # Get historical data for comparison
+    historical = df[df['county'] == forecast_county].sort_values('date')
+    
+    # Create forecast chart
+    fig_forecast = go.Figure()
+    
+    # Add historical data
+    fig_forecast.add_trace(go.Scatter(
+        x=historical['date'],
+        y=historical['confirmed_cases'],
+        mode='lines+markers',
+        name='Historical Cases',
+        line=dict(color='blue', width=2),
+        marker=dict(size=4)
+    ))
+    
+    # Add forecast data
+    fig_forecast.add_trace(go.Scatter(
+        x=county_forecast['date'],
+        y=county_forecast['predicted_cases'],
+        mode='lines+markers',
+        name='Forecasted Cases',
+        line=dict(color='red', width=2, dash='dash'),
+        marker=dict(size=4, color='orange')
+    ))
+    
+    # Add risk zones
+    fig_forecast.add_hrect(y0=150, y1=500, line_width=0, fillcolor="red", opacity=0.2, 
+                           annotation_text="High Risk Zone", annotation_position="top right")
+    fig_forecast.add_hrect(y0=70, y1=150, line_width=0, fillcolor="orange", opacity=0.2,
+                           annotation_text="Medium Risk Zone", annotation_position="right")
+    fig_forecast.add_hrect(y0=0, y1=70, line_width=0, fillcolor="green", opacity=0.2,
+                           annotation_text="Low Risk Zone", annotation_position="bottom right")
+    
+    fig_forecast.update_layout(
+        title=f'Malaria Cases Forecast for {forecast_county}',
+        xaxis_title='Date',
+        yaxis_title='Number of Cases',
+        height=500,
+        hovermode='x unified'
+    )
+    
+    st.plotly_chart(fig_forecast, use_container_width=True)
+    
+    # Climate forecast
+    st.write("### Climate Forecast (Based on Historical Averages)")
+    
+    fig_climate = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=('Rainfall Forecast', 'Temperature Forecast'),
+        vertical_spacing=0.15
+    )
+    
+    fig_climate.add_trace(
+        go.Scatter(x=county_forecast['date'], y=county_forecast['rainfall_mm'],
+                   mode='lines+markers', name='Rainfall', fill='tozeroy'),
+        row=1, col=1
+    )
+    
+    fig_climate.add_trace(
+        go.Scatter(x=county_forecast['date'], y=county_forecast['temp_mean_c'],
+                   mode='lines+markers', name='Temperature', line=dict(color='red')),
+        row=2, col=1
+    )
+    
+    fig_climate.update_layout(height=500, showlegend=False)
+    fig_climate.update_xaxes(title_text="Date", row=2, col=1)
+    fig_climate.update_yaxes(title_text="Rainfall (mm)", row=1, col=1)
+    fig_climate.update_yaxes(title_text="Temperature (°C)", row=2, col=1)
+    
+    st.plotly_chart(fig_climate, use_container_width=True)
 
 # County selector for comparison
 compare_counties = st.multiselect(
