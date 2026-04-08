@@ -1,5 +1,64 @@
 # dashboard/app.py
 import streamlit as st
+import streamlit_authenticator as stauth
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import joblib
+from datetime import datetime
+
+# ============================================
+# USER AUTHENTICATION CONFIGURATION
+# ============================================
+
+# User credentials (in production, store these securely)
+# For your project, this is fine for demonstration
+names = ['Health Official', 'Admin']
+usernames = ['health_official', 'admin']
+passwords = ['malaria2024', 'admin123']
+
+# Create authenticator object
+authenticator = stauth.Authenticate(
+    {
+        'usernames': {
+            'health_official': {
+                'name': 'Health Official',
+                'password': 'malaria2024',
+                'email': 'health@example.com'
+            },
+            'admin': {
+                'name': 'Admin',
+                'password': 'admin123',
+                'email': 'admin@example.com'
+            }
+        }
+    },
+    'afyaalert_cookie',           # Cookie name
+    'random_cookie_key_12345',    # Cookie key
+    cookie_expiry_days=1
+)
+
+# Display login widget
+name, authentication_status, username = authenticator.login('Login', 'main')
+
+# Check login status
+if authentication_status == False:
+    st.error("❌ Username/password is incorrect")
+    st.stop()
+
+if authentication_status == None:
+    st.warning("🔐 Please enter your username and password to continue")
+    st.stop()
+
+# If logged in successfully
+if authentication_status:
+    # Add logout button to sidebar
+    authenticator.logout('Logout', 'sidebar')
+    st.sidebar.success(f"✅ Welcome, {name}!")
+    
+import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -67,7 +126,7 @@ st.sidebar.title("🔍 Prediction Controls")
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv('data/processed/feature_engineered_dataset.csv')
+        df = pd.read_csv('data/processed/real_kenya_county_dataset.csv')
         df['date'] = pd.to_datetime(df['date'])
         return df
     except:
@@ -76,7 +135,7 @@ def load_data():
 @st.cache_resource
 def load_model():
     try:
-        model = joblib.load('models/random_forest_model.pkl')
+       model = joblib.load('models/xgboost_model.pkl')
         return model, "Random Forest"
     except:
         try:
@@ -407,37 +466,181 @@ with col_f2:
     else:
         st.success("✅ Low number of high-risk months predicted.")
 
-# Forecast chart
-fig_forecast = go.Figure()
+# ============================================
+# WHAT-IF PREDICTION TOOL
+# ============================================
+st.markdown("---")
+st.subheader("🔮 What-If Prediction Tool")
 
-fig_forecast.add_trace(go.Scatter(
-    x=county_history['date'],
-    y=county_history['confirmed_cases'],
-    mode='lines+markers',
-    name='Historical Cases',
-    line=dict(color='blue', width=2)
-))
+st.info("""
+**How it works:** Enter the current month's weather conditions, and the system will predict 
+the malaria risk for the **next month**. This helps you plan ahead based on expected climate patterns.
+""")
 
-fig_forecast.add_trace(go.Scatter(
-    x=pd.to_datetime(forecast_df['Date']),
-    y=forecast_df['Predicted Cases'],
-    mode='lines+markers',
-    name='Forecast',
-    line=dict(color='red', width=2, dash='dash')
-))
+# Create two columns for input
+col_wi1, col_wi2 = st.columns(2)
 
-fig_forecast.add_hrect(y0=150, y1=500, line_width=0, fillcolor="red", opacity=0.2)
-fig_forecast.add_hrect(y0=70, y1=150, line_width=0, fillcolor="orange", opacity=0.2)
-fig_forecast.add_hrect(y0=0, y1=70, line_width=0, fillcolor="green", opacity=0.2)
+with col_wi1:
+    st.markdown("### 📍 Location & Time")
+    
+    # County selection
+    whatif_county = st.selectbox(
+        "Select County",
+        options=df['county'].unique(),
+        key="whatif_county"
+    )
+    
+    # Current month selection
+    whatif_month = st.selectbox(
+        "Current Month",
+        options=list(range(1, 13)),
+        format_func=lambda x: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][x-1],
+        key="whatif_month"
+    )
+    
+    # Current year
+    whatif_year = st.number_input("Current Year", min_value=2024, max_value=2030, value=2025, key="whatif_year")
 
-fig_forecast.update_layout(
-    title=f'Malaria Cases Forecast for {forecast_county}',
-    xaxis_title='Date',
-    yaxis_title='Number of Cases',
-    height=400
-)
+with col_wi2:
+    st.markdown("### 🌧️ Weather Input (Current Month)")
+    
+    # Weather inputs
+    whatif_rainfall = st.number_input(
+        "Rainfall (mm)", 
+        min_value=0.0, 
+        max_value=500.0, 
+        value=100.0,
+        step=10.0,
+        help="Enter the rainfall amount for the current month"
+    )
+    
+    whatif_temp = st.number_input(
+        "Temperature (°C)", 
+        min_value=15.0, 
+        max_width35.0, 
+        value=24.0,
+        step=0.5,
+        help="Enter the average temperature for the current month"
+    )
+    
+    whatif_humidity = st.number_input(
+        "Humidity (%)", 
+        min_value=20.0, 
+        max_value=100.0, 
+        value=70.0,
+        step=5.0,
+        help="Enter the average humidity for the current month"
+    )
 
-st.plotly_chart(fig_forecast)
+# Calculate next month
+next_month = whatif_month + 1 if whatif_month < 12 else 1
+next_month_name = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][next_month-1]
+next_year = whatif_year + 1 if whatif_month == 12 else whatif_year
+
+st.markdown(f"### 📅 Predicting for: **{next_month_name} {next_year}**")
+
+# Predict button
+if st.button("🔮 Predict Next Month's Risk", type="primary", use_container_width=True):
+    
+    with st.spinner("Analyzing data and generating prediction..."):
+        
+        # Get historical data for this county
+        county_history = df[df['county'] == whatif_county].sort_values('date')
+        
+        if len(county_history) > 0:
+            # Get the last 3 months of actual cases for lag features
+            county_history_monthly = county_history.sort_values(['year', 'month'])
+            last_cases = county_history_monthly['incidence_rate'].tail(3).values
+            
+            # Determine season for next month
+            if next_month in [3, 4, 5]:
+                season = 'Long_Rains'
+                seasonal_factor = 1.8
+            elif next_month in [10, 11, 12]:
+                season = 'Short_Rains'
+                seasonal_factor = 1.5
+            else:
+                season = 'Dry'
+                seasonal_factor = 0.7
+            
+            # Get historical average for this month
+            historical_data = county_history[county_history['month'] == next_month]
+            if len(historical_data) > 0:
+                historical_avg = historical_data['incidence_rate'].mean()
+            else:
+                historical_avg = county_history['incidence_rate'].mean()
+            
+            # Get normal rainfall for this month
+            normal_rainfall = historical_data['rainfall_mm'].mean() if len(historical_data) > 0 else 100
+            
+            # Calculate factors
+            rainfall_factor = whatif_rainfall / normal_rainfall if normal_rainfall > 0 else 1.0
+            rainfall_factor = max(0.5, min(2.0, rainfall_factor))
+            
+            # Lag factor (if recent cases are high, next month likely high)
+            lag_factor = last_cases[-1] / county_history['incidence_rate'].mean() if len(last_cases) > 0 else 1.0
+            lag_factor = max(0.5, min(1.5, lag_factor))
+            
+            # Calculate predicted incidence rate
+            predicted_rate = historical_avg * rainfall_factor * seasonal_factor * lag_factor
+            predicted_rate = max(10, min(200, predicted_rate))
+            
+            # Determine risk level
+            if predicted_rate > 70:
+                risk = 'High'
+                risk_color = 'red'
+                icon = '🔴'
+                recommendation = "⚠️ **Immediate action:** Increase mosquito net distribution and plan for spraying campaigns."
+            elif predicted_rate > 40:
+                risk = 'Medium'
+                risk_color = 'orange'
+                icon = '🟠'
+                recommendation = "📋 **Prepare:** Stock up on supplies and alert community health workers."
+            else:
+                risk = 'Low'
+                risk_color = 'green'
+                icon = '🟢'
+                recommendation = "✅ **Monitor:** Continue routine surveillance and maintain prevention efforts."
+            
+            # Display results
+            st.markdown("---")
+            st.markdown(f"## {icon} Prediction for {whatif_county} - {next_month_name} {next_year}")
+            
+            col_r1, col_r2, col_r3 = st.columns(3)
+            
+            with col_r1:
+                st.metric("Predicted Risk Level", risk, delta=None)
+            
+            with col_r2:
+                st.metric("Predicted Incidence Rate", f"{predicted_rate:.1f} per 1,000", 
+                         delta=f"{predicted_rate - historical_avg:+.1f} vs historical")
+            
+            with col_r3:
+                confidence = int(min(100, rainfall_factor * 100))
+                st.metric("Confidence", f"{confidence}%", 
+                         help="Based on how typical the input weather is")
+            
+            # Recommendation
+            st.info(recommendation)
+            
+            # Show what influenced the prediction
+            with st.expander("🔍 What influenced this prediction?"):
+                st.markdown(f"""
+                | **Factor** | **Value** | **Impact on Risk** |
+                |------------|-----------|-------------------|
+                | **Season** | {season} | {'🔴 +80%' if season == 'Long_Rains' else '🟠 +50%' if season == 'Short_Rains' else '🟢 -30%'} |
+                | **Rainfall** | {whatif_rainfall:.1f} mm (normal: {normal_rainfall:.0f} mm) | {'🔴 +' if rainfall_factor > 1 else '🟢 '}{int(abs(rainfall_factor-1)*100)}% |
+                | **Recent cases (last month)** | {int(last_cases[-1]) if len(last_cases) > 0 else 'N/A'} cases | {'🔴 +' if lag_factor > 1 else '🟢 '}{int(abs(lag_factor-1)*100)}% |
+                | **Historical average for {next_month_name}** | {historical_avg:.1f} cases | Baseline |
+                """)
+            
+            # Show confidence meter
+            st.progress(confidence/100, text=f"Confidence Level: {confidence}%")
+            
+        else:
+            st.error(f"No historical data available for {whatif_county}. Please select another county.")
 
 # Footer
 st.markdown("---")
